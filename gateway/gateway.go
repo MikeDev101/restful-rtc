@@ -1,17 +1,15 @@
 // gateway_peerjs.go
-package main
+package gateway
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"sort"
-	"strings"
+	"strconv"
 	"sync"
 	"time"
 
@@ -72,14 +70,6 @@ var responseBuffers sync.Map
 var responseChannels sync.Map
 var dataConnection *peerjs.DataConnection
 
-// --- STDIN HELPER ---
-func readFromStdin(prompt string) string {
-	fmt.Print(prompt)
-	reader := bufio.NewReader(os.Stdin)
-	text, _ := reader.ReadString('\n')
-	return strings.TrimSpace(text)
-}
-
 // --- SPLITTER ---
 // sendSplitPacket handles chunking and sending our data
 func sendSplitPacket(dc *peerjs.DataConnection, requestID, packetType string, data []byte) error {
@@ -118,7 +108,7 @@ func sendSplitPacket(dc *peerjs.DataConnection, requestID, packetType string, da
 	return nil
 }
 
-func main() {
+func RunGateway(id string, port int) {
 	opts := peerjs.NewOptions()
 	opts.Host = "peerjs.mikedev101.cc" // <-- IMPORTANT: Change this!
 	opts.Port = 443
@@ -126,20 +116,20 @@ func main() {
 	opts.Path = "/"
 	opts.Debug = 3
 
-	gatewayPeer, err := peerjs.NewPeer("", opts)
+	endpoint_id, _ := uuid.NewUUID()
+	gatewayPeer, err := peerjs.NewPeer(endpoint_id.String(), opts)
 	if err != nil {
 		log.Fatal("Failed to create peer:", err)
 	}
 	defer gatewayPeer.Close()
 	log.Printf("Gateway peer created with ID: %s", gatewayPeer.ID)
 
-	endpointID := readFromStdin("Enter the Endpoint ID to connect to: ")
-	if endpointID == "" {
+	if id == "" {
 		log.Fatal("Endpoint ID cannot be empty.")
 	}
-	log.Printf("Attempting to connect to endpoint: %s", endpointID)
+	log.Printf("Attempting to connect to endpoint: %s", id)
 
-	conn, err := gatewayPeer.Connect(endpointID, nil)
+	conn, err := gatewayPeer.Connect(id, nil)
 	if err != nil {
 		log.Fatal("Failed to connect:", err)
 	}
@@ -149,7 +139,7 @@ func main() {
 	// ==========================================================
 	// 						REASSEMBLER (for Responses)
 	// ==========================================================
-	conn.On("data", func(data interface{}) {
+	conn.On("data", func(data any) {
 		var packet Packet
 		if err := json.Unmarshal(data.([]byte), &packet); err != nil {
 			log.Printf("Error unmarshaling packet: %v", err)
@@ -211,10 +201,10 @@ func main() {
 	})
 	// ==========================================================
 
-	conn.On("open", func(data interface{}) {
-		log.Println("Data channel open. Starting HTTP server on :8000")
+	conn.On("open", func(data any) {
+		log.Println("Data channel open. Starting HTTP server on http://localhost:" + strconv.Itoa(port))
 		http.HandleFunc("/", httpHandler)
-		if err := http.ListenAndServe(":8000", nil); err != nil {
+		if err := http.ListenAndServe(":"+strconv.Itoa(port), nil); err != nil {
 			log.Printf("HTTP server error: %v", err)
 		}
 	})

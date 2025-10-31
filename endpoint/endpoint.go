@@ -1,17 +1,14 @@
 // endpoint_peerjs.go
-package main
+package endpoint
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"sort"
-	"strings"
 	"sync"
 
 	peerjs "github.com/muka/peerjs-go"
@@ -66,17 +63,6 @@ func NewReassemblyBuffer() *ReassemblyBuffer {
 // map[requestID] -> *ReassemblyBuffer
 var requestBuffers sync.Map
 
-// This is the target service you are forwarding to.
-const targetBaseURL = "http://localhost:8000"
-
-// --- STDIN HELPER ---
-func readFromStdin(prompt string) string {
-	fmt.Print(prompt)
-	reader := bufio.NewReader(os.Stdin)
-	text, _ := reader.ReadString('\n')
-	return strings.TrimSpace(text)
-}
-
 // --- SPLITTER ---
 // sendSplitPacket handles chunking and sending our data
 func sendSplitPacket(dc *peerjs.DataConnection, requestID, packetType string, data []byte) error {
@@ -115,7 +101,7 @@ func sendSplitPacket(dc *peerjs.DataConnection, requestID, packetType string, da
 	return nil
 }
 
-func main() {
+func RunEndpoint(id string, target string) {
 	opts := peerjs.NewOptions()
 	opts.Host = "peerjs.mikedev101.cc" // <-- IMPORTANT: Change this!
 	opts.Port = 443
@@ -123,32 +109,31 @@ func main() {
 	opts.Path = "/"
 	opts.Debug = 3
 
-	endpointID := readFromStdin("Enter the ID you want this endpoint to have: ")
-	if endpointID == "" {
+	if id == "" {
 		log.Fatal("Endpoint ID cannot be empty.")
 	}
 
-	endpointPeer, err := peerjs.NewPeer(endpointID, opts)
+	endpointPeer, err := peerjs.NewPeer(id, opts)
 	if err != nil {
 		log.Fatal("Failed to create peer:", err)
 	}
 	defer endpointPeer.Close()
 
 	log.Printf("Endpoint peer created with ID: %s", endpointPeer.ID)
-	log.Println("Waiting for gateway to connect...")
+	log.Println("Waiting for any gateway to connect...")
 
-	endpointPeer.On("connection", func(data interface{}) {
+	endpointPeer.On("connection", func(data any) {
 		conn := data.(*peerjs.DataConnection)
 		log.Printf("Gateway '%s' connected!", conn.GetPeerID())
 
-		conn.On("open", func(data interface{}) {
+		conn.On("open", func(data any) {
 			log.Println("Data channel open! Ready to receive requests.")
 		})
 
 		// ==========================================================
 		// 						REASSEMBLER (for Requests)
 		// ==========================================================
-		conn.On("data", func(data interface{}) {
+		conn.On("data", func(data any) {
 			var packet Packet
 			if err := json.Unmarshal(data.([]byte), &packet); err != nil {
 				log.Printf("Error unmarshaling packet: %v", err)
@@ -196,7 +181,7 @@ func main() {
 				requestBuffers.Delete(packet.ID)
 
 				// Process the assembled request in a new goroutine
-				go handleAssembledRequest(fullRequestData.Bytes(), conn)
+				go handleAssembledRequest(fullRequestData.Bytes(), conn, target)
 			}
 		})
 		// ==========================================================
@@ -206,7 +191,7 @@ func main() {
 }
 
 // handleAssembledRequest processes the reassembled request and sends back a split response
-func handleAssembledRequest(fullRequestData []byte, conn *peerjs.DataConnection) {
+func handleAssembledRequest(fullRequestData []byte, conn *peerjs.DataConnection, target string) {
 	var req ForwardedRequest
 	if err := json.Unmarshal(fullRequestData, &req); err != nil {
 		log.Printf("Error unmarshaling full request: %v", err)
@@ -215,7 +200,7 @@ func handleAssembledRequest(fullRequestData []byte, conn *peerjs.DataConnection)
 
 	// 1. We got a request. Execute it.
 	log.Printf("Received request %s: %s %s", req.ID, req.Method, req.Path)
-	resp := executeRequest(req)
+	resp := executeRequest(req, target)
 
 	// ==========================================================
 	// 						SPLITTER (for Responses)
@@ -237,8 +222,8 @@ func handleAssembledRequest(fullRequestData []byte, conn *peerjs.DataConnection)
 }
 
 // --- HTTP EXECUTION ---
-func executeRequest(req ForwardedRequest) ForwardedResponse {
-	url := targetBaseURL + req.Path
+func executeRequest(req ForwardedRequest, target string) ForwardedResponse {
+	url := target + req.Path
 	if req.Query != "" {
 		url += "?" + req.Query
 	}

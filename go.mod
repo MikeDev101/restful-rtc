@@ -1,4 +1,4 @@
-module gateway
+module restful_rtc
 
 go 1.25.2
 
