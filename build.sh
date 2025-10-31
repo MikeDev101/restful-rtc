@@ -3,7 +3,10 @@
 # Define the platforms you want to build for
 # Format: "OS/ARCH"
 targets=(
+    "windows/386"    # For older windows devices
     "windows/amd64"
+    "windows/arm64"  # For newer ARM windows devices
+    "linux/386"      # For 32-bit Linux
     "linux/amd64"
     "linux/arm64"    # For Raspberry Pi / ARM servers
     "darwin/amd64"   # For Intel-based macOS
