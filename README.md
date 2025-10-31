@@ -9,3 +9,8 @@ The gateway will spawn a HTTP REST server on port 8000, which will then proxy al
 The endpoint server will then send the traffic to the target REST server (i.e. localhost:8000) and return responses to the gateway client.
 
 Think of it like the VSCode share server feature. 
+
+# Limitations
+* Has no support for WebSockets
+* Has no security checks, it's just a really dumb forwarder
+* Currently hardcoded to `http://localhost:8000` for both the endpoint server and gateway client
